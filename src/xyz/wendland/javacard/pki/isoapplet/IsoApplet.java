@@ -138,7 +138,6 @@ public class IsoApplet extends Applet implements ExtendedLength {
     private Key[] keys = null;
     private byte[] ram_buf = null;
     private Cipher rsaPkcs1Cipher = null;
-    private Signature ecdsaSignature = null;
     private Signature rsaSha1PssSignature = null;
     private Signature rsaSha224PssSignature = null;
     private Signature rsaSha256PssSignature = null;
@@ -177,20 +176,9 @@ public class IsoApplet extends Applet implements ExtendedLength {
 
         rsaPkcs1Cipher = Cipher.getInstance(Cipher.ALG_RSA_PKCS1, false);
 
-        // API features: probe card support for ECDSA
-        try {
-            ecdsaSignature = Signature.getInstance(MessageDigest.ALG_NULL, Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL, false);
+        // API features: probe card support for ECDSA with SHA-256 (more might be supported but we only test SHA-256 to be able to run in simulator)
+        if (testEcdsaDigestAlgo(MessageDigest.ALG_SHA_256)) {
             api_features |= API_FEATURE_ECC;
-        } catch (CryptoException e) {
-            if(e.getReason() == CryptoException.NO_SUCH_ALGORITHM) {
-                /* Few Java Cards do not support ECDSA at all.
-                 * We should not throw an exception in this cases
-                 * as this would prevent installation. */
-                ecdsaSignature = null;
-                api_features &= ~API_FEATURE_ECC;
-            } else {
-                throw e;
-            }
         }
 
         // API features: probe card support for 4096 bit RSA keys
@@ -232,7 +220,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
 
         // API features: probe secure random number generation support.
         try {
-            randomData = RandomData.getInstance(RandomData.ALG_SECURE_RANDOM);
+            randomData = RandomData.getInstance(RandomData.ALG_KEYGENERATION);
             api_features |= API_FEATURE_SECURE_RANDOM;
         } catch (CryptoException e) {
             if(e.getReason() == CryptoException.NO_SUCH_ALGORITHM) {
@@ -241,10 +229,6 @@ public class IsoApplet extends Applet implements ExtendedLength {
             } else {
                 throw e;
             }
-        }
-
-        if(JCSystem.isObjectDeletionSupported()) {
-            JCSystem.requestObjectDeletion();
         }
 
         state = STATE_CREATION;
@@ -744,9 +728,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[privKeyRef].clearKey();
             }
             keys[privKeyRef] = kp.getPrivate();
-            if(JCSystem.isObjectDeletionSupported()) {
-                JCSystem.requestObjectDeletion();
-            }
+            requestObjectDeletion();
 
             // Return pubkey. See ISO7816-8 table 3.
             try {
@@ -817,9 +799,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[privKeyRef].clearKey();
             }
             keys[privKeyRef] = privKey;
-            if(JCSystem.isObjectDeletionSupported()) {
-                JCSystem.requestObjectDeletion();
-            }
+            requestObjectDeletion();
 
             // Return pubkey. See ISO7816-8 table 3.
             try {
@@ -833,6 +813,54 @@ public class IsoApplet extends Applet implements ExtendedLength {
 
         default:
             ISOException.throwIt(ISO7816.SW_CONDITIONS_NOT_SATISFIED);
+        }
+    }
+
+    /**
+     * \brief Request object deletion
+     */
+    private static void requestObjectDeletion() {
+        if(JCSystem.isObjectDeletionSupported()) {
+            JCSystem.requestObjectDeletion();
+        }
+    }
+
+    private static boolean testEcdsaDigestAlgo(byte algo) {
+        Signature.OneShot sig = null;
+        try {
+            sig = Signature.OneShot.open(algo, Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL);
+            return true;
+        } catch (CryptoException e) {
+            if (e.getReason() == CryptoException.NO_SUCH_ALGORITHM) {
+                return false;
+            } else {
+                throw e;
+            }
+        } finally {
+            if (sig != null) {
+                sig.close();
+            }
+            sig = null;
+        }
+    }
+
+    private static byte getMessageDigestAlgoByLength(short length) throws ISOException {
+        switch (length) {
+        case MessageDigest.LENGTH_MD5:
+            return MessageDigest.ALG_MD5;
+        case MessageDigest.LENGTH_SHA:
+            return MessageDigest.ALG_SHA; // or ALG_RIPEMD160
+        case MessageDigest.LENGTH_SHA_224:
+            return MessageDigest.ALG_SHA_224; // or ALG_SHA3_224
+        case MessageDigest.LENGTH_SHA_256:
+            return MessageDigest.ALG_SHA_256; // or ALG_SHA3_256
+        case MessageDigest.LENGTH_SHA_384:
+            return MessageDigest.ALG_SHA_384; // or ALG_SHA3_384
+        case MessageDigest.LENGTH_SHA_512:
+            return MessageDigest.ALG_SHA_512; // or ALG_SHA3_512
+        default:
+            ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
+            return -1; // compiler is not happy otherwise
         }
     }
 
@@ -1101,7 +1129,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
             if(privKeyRef < 0) {
                 ISOException.throwIt(ISO7816.SW_DATA_INVALID);
             }
-            if(algRef == ALG_GEN_EC && ecdsaSignature == null) {
+            if(algRef == ALG_GEN_EC && (api_features & API_FEATURE_ECC) == 0) {
                 // There are cards that do not support ECDSA at all.
                 ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
             }
@@ -1129,7 +1157,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 if(keys[privKeyRef].getType() != KeyBuilder.TYPE_EC_FP_PRIVATE) {
                     ISOException.throwIt(ISO7816.SW_DATA_INVALID);
                 }
-                if(ecdsaSignature == null) {
+                if((api_features & API_FEATURE_ECC) == 0) {
                     ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
                 }
 
@@ -1331,9 +1359,20 @@ public class IsoApplet extends Applet implements ExtendedLength {
             // Get the key - it must be a EC private key,
             // checks have been done in MANAGE SECURITY ENVIRONMENT.
             ECPrivateKey ecKey = (ECPrivateKey) keys[currentPrivateKeyRef[0]];
-            ecdsaSignature.init(ecKey, Signature.MODE_SIGN);
-            sigLen = ecdsaSignature.sign(ram_buf, (short)0, lc, apdu.getBuffer(), (short)0);
-            apdu.setOutgoingAndSend((short) 0, sigLen);
+            Signature.OneShot sig = null;
+            try {
+                sig = Signature.OneShot.open(getMessageDigestAlgoByLength(lc), Signature.SIG_CIPHER_ECDSA, Cipher.PAD_NULL);
+                sig.init(ecKey, Signature.MODE_SIGN);
+                sigLen = sig.signPreComputedHash(ram_buf, (short)0, lc, apdu.getBuffer(), (short)0);
+                apdu.setOutgoingAndSend((short) 0, sigLen);
+            } catch (CryptoException e) {
+                ISOException.throwIt(ISO7816.SW_FUNC_NOT_SUPPORTED);
+            } finally {
+                if (sig != null) {
+                    sig.close();
+                    sig = null;
+                }
+            }
             break;
 
         default:
@@ -1557,9 +1596,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[currentPrivateKeyRef[0]].clearKey();
             }
             keys[currentPrivateKeyRef[0]] = rsaPrKey;
-            if(JCSystem.isObjectDeletionSupported()) {
-                JCSystem.requestObjectDeletion();
-            }
+            requestObjectDeletion();
             JCSystem.commitTransaction();
         } else {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
@@ -1670,9 +1707,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
                 keys[currentPrivateKeyRef[0]].clearKey();
             }
             keys[currentPrivateKeyRef[0]] = ecPrKey;
-            if(JCSystem.isObjectDeletionSupported()) {
-                JCSystem.requestObjectDeletion();
-            }
+            requestObjectDeletion();
             JCSystem.commitTransaction();
         } else {
             ISOException.throwIt(ISO7816.SW_DATA_INVALID);
@@ -1707,7 +1742,7 @@ public class IsoApplet extends Applet implements ExtendedLength {
         if(le <= 0 || le > 256) {
             ISOException.throwIt(ISO7816.SW_WRONG_LENGTH);
         }
-        randomData.generateData(ram_buf, (short)0, le);
+        randomData.nextBytes(ram_buf, (short)0, le);
         apdu.setOutgoingLength(le);
         apdu.sendBytesLong(ram_buf, (short)0, le);
     }

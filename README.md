@@ -1,3 +1,7 @@
+# Fork differences
+* Use Java Card 3.0.5
+* Support most usecases of off-card hashing ECDSA even on cards that do not have `ALG_NULL` together with `SIG_CIPHER_ECDSA`.
+
 # General Information
 The Java Card IsoApplet (e.g. for use with OpenSC).
 The Applet is capable of saving a PKCS#15 file structure and performing PKI related operations using the private key, such as signing or decrypting.
@@ -14,18 +18,12 @@ This is very common among Java Card smartcards.
 
 ## New version of IsoApplet (v1)
 This version is found on the [main branch](https://github.com/philipWendland/IsoApplet/tree/main).
-It targets smartcards with Java Card version >= 3.0.4.
+It targets smartcards with Java Card version >= 3.0.5.
 This version requires extended APDUs the be used and supported by your reader and smartcard (javacardx.apdu.ExtendedLength).
 If supported by your smart card, the newer version of IsoApplet supports the following additional features:
 * RSA keys of 4096 bit length
 * RSA PSS signatures
 * ECDSA with off-card hashing, which makes ECC actually usable in practice
-
-## Legacy Version of IsoApplet (v0)
-The legacy version is found on the [main-javacard-v2.2.2 branch](https://github.com/philipWendland/IsoApplet/tree/main-javacard-v2.2.2) branch.
-It targets smartcards with Java Card version >= 2.2.2.
-The ECDSA implementation with Java Card version 2.2.2 is hardly usable in practice because it requires on-card hash generation.
-If your smartcard implements javacardx.apdu.ExtendedLength and IsoApplet is configured with `DEF_EXT_APDU` in `IsoApplet.java`, you can use extended APDUs.
 
 # Build process
 This project uses [ant-javacard](https://github.com/martinpaljak/ant-javacard) to build cap-files.
