@@ -1,6 +1,29 @@
 # Fork differences
 * Use Java Card 3.0.5
 * Support most usecases of off-card hashing ECDSA even on cards that do not have `ALG_NULL` together with `SIG_CIPHER_ECDSA`.
+* API features are not probed anymore, they are supplied with install parameters
+* Configuration parameters can be supplied with install parameters instead of recompiling
+
+## Install parameters
+
+* Tag `81`: API features, required, length 1, bitwise OR of the following flags:
+    * `0x01`: extended APDU support (required)
+    * `0x02`: secure random number generator support
+    * `0x04`: ECC support
+    * `0x08`: RSA-PSS support
+    * `0x20`: RSA 4096 bits support
+* Tag `82`: configuration, optional, length 1, bitwise OR of the following flags:
+    * `0x01`: use global PIN (not implemented yet)
+    * `0x02`: allow private key import
+    * `0x04`: PUK must be set (mutually exclusive with global PIN usage)
+
+Examples:
+
+* All features, no private key import, PUK optional, no global PIN: `81012F`
+* All features, with private key import, PUK optional, no global PIN: `81012F820102`
+* All features except RSA 4096, no private key import, PUK optional, no global PIN: `81010F`
+
+On some NXP JCOP 4 from AliExpress (J3R150, J3R180) RSA 4096 is not available in which case you would use the third example above.
 
 # General Information
 The Java Card IsoApplet (e.g. for use with OpenSC).
